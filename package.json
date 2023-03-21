@@ -38,7 +38,7 @@
     "mysql": "^2.18.1",
     "nodemon": "^2.0.7",
     "prettier": "^2.2.1",
-    "serverless": "^2.31.0",
+    "serverless": "^3.28.0",
     "serverless-esbuild": "^1.26.1",
     "serverless-offline": "^7.0.0",
     "serverless-prune-plugin": "^1.4.4",
