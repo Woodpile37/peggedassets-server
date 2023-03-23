@@ -51,7 +51,7 @@
   "dependencies": {
     "@acala-network/api": "^3.0.2",
     "@connext/nxtp-contracts": "0.0.94",
-    "@connext/nxtp-utils": "0.0.94",
+    "@connext/nxtp-utils": "0.2.7",
     "@defillama/adapters": "file:./DefiLlama-Adapters",
     "@defillama/sdk": "^2.3.61",
     "@makerdao/multicall": "^0.12.0",
