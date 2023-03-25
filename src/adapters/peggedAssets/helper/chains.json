@@ -115,5 +115,19 @@
   "zksync",
   "fusion",
   "aztec",
-  "reinetwork"
+  "reinetwork",
+  "smartBCH",
+  "starknet",
+  "acala",
+  "karura",
+  "mixin",
+  "sx",
+  "defichain",
+  "canto",
+  "dogechain",
+  "arbitrum_nova",
+  "kujira",
+  "ethpow",
+  "aptos",
+  "comdex"
 ]

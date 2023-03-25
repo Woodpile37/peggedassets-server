@@ -1,11 +1,17 @@
+import { BigNumber } from "ethers";
 import { PeggedAsset } from "../../peggedData/peggedData";
-import * as Sentry from "@sentry/serverless";
-import { PeggedAssetIssuance, PeggedTokenBalance } from "../../types";
+import {
+  PeggedAssetIssuance,
+  PeggedTokenBalance,
+  BridgeBalances,
+} from "../../types";
 import {
   hourlyPeggedBalances,
   dailyPeggedBalances,
 } from "../utils/getLastRecord";
 import storeNewPeggedBalances from "./storeNewPeggedBalances";
+import { executeAndIgnoreErrors } from "./errorDb";
+import { getCurrentUnixTimestamp } from "../../utils/date";
 
 type ChainBlocks = {
   [chain: string]: number;
@@ -15,10 +21,12 @@ type BridgeMapping = {
   [chain: string]: PeggedTokenBalance[];
 };
 
+type EmptyObject = { [key: string]: undefined };
+
 async function getPeggedAsset(
   unixTimestamp: number,
   ethBlock: number,
-  chainBlocks: ChainBlocks,
+  chainBlocks: ChainBlocks | undefined,
   peggedAsset: PeggedAsset,
   peggedBalances: PeggedAssetIssuance,
   chain: string,
@@ -56,7 +64,7 @@ async function getPeggedAsset(
 
       peggedBalances[chain][issuanceType] = balance;
       if (issuanceType !== "minted" && issuanceType !== "unreleased") {
-        // issuanceType must be a chain within peggedBalances, but I check for that when testing adapters.
+        // issuanceType must be a chain as key on bridgedFromMapping, but I check for that when testing adapters.
         bridgedFromMapping[issuanceType] =
           bridgedFromMapping[issuanceType] || [];
         bridgedFromMapping[issuanceType].push(balance);
@@ -68,6 +76,7 @@ async function getPeggedAsset(
           `Getting circulating for ${peggedAsset.name} on chain ${chain} failed.`,
           e
         );
+        executeAndIgnoreErrors('INSERT INTO `errors2` VALUES (?, ?, ?, ?)', [getCurrentUnixTimestamp(), peggedAsset.gecko_id, chain, String(e)]);
         peggedBalances[chain][issuanceType] = { [pegType]: null };
       } else {
         console.error(peggedAsset.name, e);
@@ -77,9 +86,47 @@ async function getPeggedAsset(
   }
 }
 
+function mergeBridges(
+  bridgeBalances: BridgeBalances | EmptyObject,
+  bridgeBalancesToMerge: BridgeBalances
+) {
+  if (bridgeBalances && Object.keys(bridgeBalances).length === 0) {
+    return bridgeBalancesToMerge;
+  }
+  bridgeBalances = bridgeBalances as BridgeBalances;
+  for (let bridgeID in bridgeBalancesToMerge) {
+    for (let sourceChain in bridgeBalancesToMerge[bridgeID]) {
+      if (bridgeBalances?.[bridgeID]?.[sourceChain]) {
+        const bridgeBalance = bridgeBalances[bridgeID][sourceChain].amount ?? 0;
+        const bridgeBalanceToMerge =
+          bridgeBalancesToMerge[bridgeID][sourceChain].amount;
+        if (
+          typeof bridgeBalance === "number" &&
+          typeof bridgeBalanceToMerge === "number"
+        ) {
+          bridgeBalances[bridgeID][sourceChain].amount =
+            bridgeBalance + bridgeBalanceToMerge;
+        } else {
+          bridgeBalances[bridgeID][sourceChain].amount = BigNumber.from(
+            bridgeBalance ?? 0
+          )
+            .add(BigNumber.from(bridgeBalanceToMerge))
+            .toNumber();
+        }
+      } else {
+        bridgeBalances[bridgeID] = bridgeBalances[bridgeID] || {};
+        bridgeBalances[bridgeID][sourceChain] =
+          bridgeBalancesToMerge[bridgeID][sourceChain];
+      }
+    }
+  }
+  return bridgeBalances;
+}
+
 async function calcCirculating(
   peggedBalances: PeggedAssetIssuance,
   bridgedFromMapping: BridgeMapping,
+  peggedAsset: PeggedAsset,
   pegType: string
 ) {
   let chainCirculatingPromises = Object.keys(peggedBalances).map(
@@ -91,6 +138,9 @@ async function calcCirculating(
       Object.entries(chainIssuances).map(
         ([issuanceType, peggedTokenBalance]) => {
           const balance = peggedTokenBalance[pegType];
+          const bridges = JSON.parse(
+            JSON.stringify(peggedTokenBalance.bridges ?? {})
+          );
           if (balance == null) {
             return;
           }
@@ -100,11 +150,18 @@ async function calcCirculating(
           } else {
             if (issuanceType !== "bridgedTo") {
               if (issuanceType !== "minted" && issuanceType !== "circulating") {
-                peggedBalances[chain].bridgedTo[pegType]! += // issuanceType is a chain here
-                  balance;
+                // issuanceType is a chain here
+                peggedBalances[chain].bridgedTo[pegType]! += balance;
+                if (bridges) {
+                  peggedBalances[chain].bridgedTo.bridges = mergeBridges(
+                    peggedBalances[chain].bridgedTo.bridges || {},
+                    bridges
+                  );
+                }
               }
               circulating[pegType] = circulating[pegType] || 0;
               circulating[pegType]! += balance; // issuanceType is either "minted" or a chain here
+              delete peggedTokenBalance.bridges;
             }
           }
         }
@@ -116,12 +173,14 @@ async function calcCirculating(
             console.error(
               `Null balance or 0 circulating error on chain ${chain}`
             );
+            executeAndIgnoreErrors('INSERT INTO `errors2` VALUES (?, ?, ?, ?)', [getCurrentUnixTimestamp(), peggedAsset.gecko_id, chain, `Null balance or 0 circulating error`]);
             return;
           }
           circulating[pegType]! -= balance;
         });
       }
       if (circulating[pegType]! < 0) {
+        executeAndIgnoreErrors('INSERT INTO `errors2` VALUES (?, ?, ?, ?)', [getCurrentUnixTimestamp(), peggedAsset.gecko_id, chain, `Pegged asset has negative circulating amount`]);
         throw new Error(
           `Pegged asset on chain ${chain} has negative circulating amount`
         );
@@ -156,7 +215,7 @@ async function calcCirculating(
 export async function storePeggedAsset(
   unixTimestamp: number,
   ethBlock: number,
-  chainBlocks: ChainBlocks,
+  chainBlocks: ChainBlocks | undefined,
   peggedAsset: PeggedAsset,
   module: any,
   maxRetries: number = 1,
@@ -198,7 +257,7 @@ export async function storePeggedAsset(
       }
     );
     await Promise.all(peggedBalancesPromises);
-    await calcCirculating(peggedBalances, bridgedFromMapping, pegType);
+    await calcCirculating(peggedBalances, bridgedFromMapping, peggedAsset, pegType);
 
     if (
       typeof peggedBalances.totalCirculating.circulating[pegType] !== "number"
@@ -210,9 +269,6 @@ export async function storePeggedAsset(
     }
   } catch (e) {
     console.error(peggedAsset.name, e);
-    const scope = new Sentry.Scope();
-    scope.setTag("peggedAsset", peggedAsset.name);
-    Sentry.AWSLambda.captureException(e, scope);
     return;
   }
   if (
@@ -236,9 +292,6 @@ export async function storePeggedAsset(
     await storeTokensAction;
   } catch (e) {
     console.error(peggedAsset.name, e);
-    const scope = new Sentry.Scope();
-    scope.setTag("peggedAsset", peggedAsset.name);
-    Sentry.AWSLambda.captureException(e, scope);
     return;
   }
 

@@ -17,6 +17,7 @@ type ChainContracts = {
   };
 };
 
+// all multichain
 const chainContracts: ChainContracts = {
   ethereum: {
     issued: ["0x853d955acef822db058eb8505911ed77f175b99e"],
@@ -66,6 +67,12 @@ const chainContracts: ChainContracts = {
   milkomeda: {
     bridgedFromETH: ["0x362233F1eF554Ca08555Ca191b4887c2C3132834"], // wormhole: not canonical FRAX
   },
+  everscale: {
+    bridgeOnETH: ["0xF2403a61C7A97a1a1b94A225173F6dD03614B907"], // octus: not canonical FRAX
+  },
+  dogechain: {
+    bridgedFromETH: ["0xf27Ee99622C3C9b264583dACB2cCE056e194494f"], // multichain
+  }
 };
 
 /*
@@ -85,33 +92,11 @@ async function chainMinted(chain: string, decimals: number) {
         await sdk.api.abi.call({
           abi: "erc20:totalSupply",
           target: issued,
-          block: _chainBlocks[chain],
+          block: _chainBlocks?.[chain],
           chain: chain,
         })
       ).output;
-      sumSingleBalance(balances, "peggedUSD", totalSupply / 10 ** decimals);
-    }
-    return balances;
-  };
-}
-
-async function chainUnreleased(chain: string, decimals: number, owner: string) {
-  return async function (
-    _timestamp: number,
-    _ethBlock: number,
-    _chainBlocks: ChainBlocks
-  ) {
-    let balances = {} as Balances;
-    for (let issued of chainContracts[chain].issued) {
-      const reserve = (
-        await sdk.api.erc20.balanceOf({
-          target: issued,
-          owner: owner,
-          block: _chainBlocks[chain],
-          chain: chain,
-        })
-      ).output;
-      sumSingleBalance(balances, "peggedUSD", reserve / 10 ** decimals);
+      sumSingleBalance(balances, "peggedUSD", totalSupply / 10 ** decimals, "issued", false);
     }
     return balances;
   };
@@ -228,6 +213,20 @@ const adapter: PeggedIssuanceAdapter = {
       18,
       chainContracts.milkomeda.bridgedFromETH
     ),
+  },
+  everscale: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: supplyInEthereumBridge(
+      chainContracts.ethereum.issued[0],
+      chainContracts.everscale.bridgeOnETH[0],
+      18
+    ),
+  },
+  dogechain: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply("dogechain", 18, chainContracts.dogechain.bridgedFromETH),
   },
 };
 

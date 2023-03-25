@@ -8,6 +8,14 @@ import {
 } from "../helper/getSupply";
 import { getTokenBalance as solanaGetTokenBalance } from "../helper/solana";
 import {
+  getTotalSupply as ontologyGetTotalSupply,
+  getBalance as ontologyGetBalance,
+} from "../helper/ontology";
+import { getTotalSupply as kavaGetTotalSupply } from "../helper/kava";
+import { getTotalBridged as pnGetTotalBridged } from "../helper/polynetwork";
+import { getTotalSupply as aptosGetTotalSupply } from "../helper/aptos";
+import { call as nearCall } from "../llama-helper/near";
+import {
   ChainBlocks,
   PeggedIssuanceAdapter,
   Balances,
@@ -16,7 +24,7 @@ import {
   getTokenBalance as tronGetTokenBalance,
   getTotalSupply as tronGetTotalSupply, // NOTE THIS DEPENDENCY
 } from "../helper/tron";
-import { multiFunctionBalance } from "../helper/generalUtil";
+import { sumMultipleBalanceFunctions } from "../helper/generalUtil";
 const axios = require("axios");
 const retry = require("async-retry");
 
@@ -43,7 +51,8 @@ const chainContracts: ChainContracts = {
     bridgedFromSol: ["0x3553f861dEc0257baDA9F8Ed268bf0D74e45E89C"], // wormhole
   },
   bsc: {
-    bridgeOnETH: ["0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503"], // native one can't get balance
+    bridgeOnETH: ["0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503"], // can get amount bridged from ETH from this
+    bridgedFromETHAndTron: ["0x55d398326f99059fF775485246999027B3197955"], // bridged from both Ethereum and Tron
     bridgedFromAvax: ["0x2B90E061a517dB2BbD7E39Ef7F733Fd234B494CA"], // wormhole
     bridgedFromETH: ["0x524bC91Dc82d6b90EF29F76A3ECAaBAffFD490Bc"], // wormhole
     bridgedFromSol: ["0x49d5cC521F75e13fa8eb4E89E9D381352C897c96"], // wormhole but the info on this is typo'd???
@@ -106,7 +115,7 @@ const chainContracts: ChainContracts = {
       "0x3c751Feb00364CA9e2d0105c40F0b423abf1DEE3", // passport.meter
       "0xeFAeeE334F0Fd1712f9a8cc375f427D9Cdd40d73", // multichain
       "0x81ECac0D6Be0550A00FF064a4f9dd2400585FE9c", // celer
-      "0x8e70cD5B4Ff3f62659049e74b6649c6603A0E594", // nomad
+      // "0x8e70cD5B4Ff3f62659049e74b6649c6603A0E594", // nomad, hacked
       "0xdfd74af792bc6d45d1803f425ce62dd16f8ae038", // axelar
     ],
   },
@@ -127,7 +136,7 @@ const chainContracts: ChainContracts = {
   },
   syscoin: {
     bridgeOnETH: ["0x8cC49FE67A4bD7a15674c4ffD4E969D94304BBbf"],
-    bridgedFromETH: ["0x922d641a426dcffaef11680e5358f34d97d112e1"],
+    bridgedFromETH: ["0x922d641a426dcffaef11680e5358f34d97d112e1"], // multichain
   },
   kardia: {
     bridgedFromETH: ["0x551a5dcac57c66aa010940c2dcff5da9c53aa53b"],
@@ -148,9 +157,9 @@ const chainContracts: ChainContracts = {
   },
   milkomeda: {
     bridgedFromETH: [
-      "0x80A16016cC4A2E6a2CACA8a4a498b1699fF0f844", // where is this from?
+      "0x80A16016cC4A2E6a2CACA8a4a498b1699fF0f844", // where is this from? assuming multichain
       "0x3795C36e7D12A8c252A20C5a7B455f7c57b60283", // celer
-      "0xab58DA63DFDd6B97EAaB3C94165Ef6f43d951fb2", // nomad
+      //"0xab58DA63DFDd6B97EAaB3C94165Ef6f43d951fb2", // nomad, hacked
     ],
   },
   iotex: {
@@ -158,15 +167,20 @@ const chainContracts: ChainContracts = {
     bridgedFromETH: ["0x6fbcdc1169b5130c59e72e51ed68a84841c98cd1"],
   },
   aurora: {
-    bridgeOnETH: ["0x23Ddd3e3692d1861Ed57EDE224608875809e127f"], // 60M disparity, not sure
-    bridgedFromETH: ["0x4988a896b1227218e4a686fde5eabdcabd91571f"],
+    bridgeOnETH: ["0x23Ddd3e3692d1861Ed57EDE224608875809e127f"],
+    bridgedFromNear: ["0x4988a896b1227218e4a686fde5eabdcabd91571f"], // rainbow bridge
+    /*
+    this is claimed by both rainbow bridge and celer. there does not appear to be enough in the
+    rainbow bridge and celer bridge contracts on ethereum for both aurora and near to have
+    USDT bridged independently, and near dev claims aurora's USDT may be a subset of near's
+    */
   },
   telos: {
-    bridgedFromETH: ["0xefaeee334f0fd1712f9a8cc375f427d9cdd40d73"],
+    bridgedFromETH: ["0xefaeee334f0fd1712f9a8cc375f427d9cdd40d73"], // assuming multichain
   },
   oasis: {
     bridgedFromETH: [
-      "0x6Cb9750a92643382e020eA9a170AbB83Df05F30B", // 107M, their discord claims it is from evodefi bridge?? sus
+      //"0x6Cb9750a92643382e020eA9a170AbB83Df05F30B", // EvoDefi, this was rugged, trading at $0.10
       "0xdC19A122e268128B5eE20366299fc7b5b199C8e3", // wormhole #3
       "0x4Bf769b05E832FCdc9053fFFBC78Ca889aCb5E1E", // celer
     ],
@@ -186,7 +200,8 @@ const chainContracts: ChainContracts = {
   evmos: {
     bridgedFromETH: [
       "0xb72A7567847abA28A2819B855D7fE679D4f59846", // celer
-      "0x7FF4a56B32ee13D7D4D405887E0eA37d61Ed919e", // nomad (contract has 18 decimals, but supply is divided by 10**12)
+      //"0x7FF4a56B32ee13D7D4D405887E0eA37d61Ed919e", // nomad (contract has 18 decimals, but supply is divided by 10**12), hacked, trading at $0.15
+      "0xc1be9a4d5d45beeacae296a7bd5fadbfc14602c4", // multichain
     ],
   },
   terra: {
@@ -234,10 +249,83 @@ const chainContracts: ChainContracts = {
       "0xd226392c23fb3476274ed6759d4a478db3197d82", // axelar (0 supply?)
     ],
   },
+  celo: {
+    bridgedFromETH6Decimals: [
+      "0x88eeC49252c8cbc039DCdB394c0c2BA2f1637EA0", // optics
+    ],
+    bridgedFromETH18Decimals: [
+      "0xcfffe0c89a779c09df3df5624f54cdf7ef5fdd5d", // moss
+    ],
+  },
+  kava: {
+    bridgedFromETH: [
+      "0xfB1af1baFE108906C0f1f3B36D15919B95ee95BD", // celer
+      "0xB44a9B6905aF7c801311e8F4E76932ee959c663C", // multichain
+    ],
+  },
+  conflux: {
+    bridgedFromETH: [
+      "0xfe97e85d13abd9c1c33384e796f10b73905637ce", // celer
+      "0x8b8689c7f3014a4d86e4d1d0daaf74a47f5e0f27", // (converted address) shuttleflow
+    ],
+  },
+  ontology: {
+    bridgedFromETH: [
+      "ac654837a90eee8fccabd87a2d4fc7637484f01a", // poly network
+      "0xd85e30c5d372942810c86c4ac9d7b3bb24cc1965", // celer
+    ],
+    unreleased: ["AVaijxNJvAXYdNMVSYAfT8wVTh8tNHcTBM"], // poly network reserve
+  },
+  sx: {
+    bridgedFromETH: ["0x03Cc0D20B5eA163Aa3c0851235f4653F6Fe61017"], // celer
+  },
+  ethereumclassic: {
+    bridgedFromETH: ["0xc9BAA8cfdDe8E328787E29b4B078abf2DaDc2055"], // multichain
+  },
+  near: {
+    bridgedFromETH: [
+      "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near",
+    ], // rainbow bridge
+  },
+  wan: {
+    bridgeOnETH: ["0xfCeAAaEB8D564a9D0e71Ef36f027b9D162bC334e"], // amount minted on wan does not match amount in bridge contract, using bridge contract amount for now
+  },
+  defichain: {
+    bridgeOnETH: ["0x94fa70d079d76279e1815ce403e9b985bccc82ac"], // seems there is no direct bridge from ETH. but users can withdraw to defichain using cake defi?
+  },
+  klaytn: {
+    bridgedFromETH: ["0xcee8faf64bb97a73bb51e115aa89c17ffa8dd167"], // orbit
+  },
+  canto: {
+    bridgedFromETH: ["0xd567B3d7B8FE3C79a1AD8dA978812cfC4Fa05e75"], // canto/gravity
+  },
+  everscale: {
+    bridgeOnETH: ["0x81598d5362eAC63310e5719315497C5b8980C579"], // octus(?)
+  },
+  dogechain: {
+    bridgedFromETH: ["0xE3F5a90F9cb311505cd691a46596599aA1A0AD7D"], // multichain
+  },
+  arbitrum_nova: {
+    bridgedFromETH: ["0x52484E1ab2e2B22420a25c20FA49E173a26202Cd"],
+  },
+  ethpow: {
+    bridgedFromETH: ["0x2ad7868ca212135c6119fd7ad1ce51cfc5702892"], // chainge
+  },
+  aptos: {
+    bridgedFromETH: [
+      "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa", // stargate
+      "0xa2eda21a58856fda86451436513b867c97eecb4ba099da5775520e0f7492e852", // wormhole
+    ],
+  },
 };
 
-/* 
+/*
+Tezos is using USDT's API for now but could probably be easily moved to other API.
+
+Omni is using USDT's API, it seems there may now be multiple addresses of USDT, so explorer queries need to be updated.
+
 EOS can't find suitable API, using USDT's API for now.
+pNetwork has USDT, USDC, DAI bridge to EOS, but so far unable to understand the EOS API.
 
 Statemine is using USDT's API.
 
@@ -252,18 +340,15 @@ Cronos: they have not provided any proof the circulating USDT is real USDT.
 
 Don't know how to count the 2 Saber wrapped USDT on Solana.
 
-Evmos: missing multichain, it has no liquidity on dexes, and can't find address.
-
-Conflux, flow, don't know how to make calls.
 Conflux: cfx:acf2rcsh8payyxpg6xj7b0ztswwh81ute60tsw35j7 from shuttleflow, don't know where from
 0xfe97E85d13ABD9c1c33384E796F10B73905637cE celer
 Flow: A.231cc0dbbcffc4b7.ceUSDT celer, check for others.
 
 Don't know if every multichain contract has been found and included or not.
 
-Orbit: has no provider, no API.
-
 Velas: amount on chain does not match amount in multichain bridge, so it has not been added yet.
+
+Caduceus: 0x639a647fbe20b6c8ac19e48e2de44ea792c62c5c is multichain, don't have provider or API yet.
 */
 
 async function chainMinted(chain: string, decimals: number) {
@@ -278,11 +363,17 @@ async function chainMinted(chain: string, decimals: number) {
         await sdk.api.abi.call({
           abi: "erc20:totalSupply",
           target: issued,
-          block: _chainBlocks[chain],
+          block: _chainBlocks?.[chain],
           chain: chain,
         })
       ).output;
-      sumSingleBalance(balances, "peggedUSD", totalSupply / 10 ** decimals);
+      sumSingleBalance(
+        balances,
+        "peggedUSD",
+        totalSupply / 10 ** decimals,
+        "issued",
+        false
+      );
     }
     return balances;
   };
@@ -300,12 +391,53 @@ async function chainUnreleased(chain: string, decimals: number, owner: string) {
         await sdk.api.erc20.balanceOf({
           target: issued,
           owner: owner,
-          block: _chainBlocks[chain],
+          block: _chainBlocks?.[chain],
           chain: chain,
         })
       ).output;
       sumSingleBalance(balances, "peggedUSD", reserve / 10 ** decimals);
     }
+    return balances;
+  };
+}
+
+async function bscBridgedFromTron(
+  bscUSDTAddress: string,
+  ethUSDTAddress: string
+) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    const totalSupply =
+      (
+        await sdk.api.abi.call({
+          abi: "erc20:totalSupply",
+          target: bscUSDTAddress,
+          block: _chainBlocks?.["bsc"],
+          chain: "bsc",
+        })
+      ).output /
+      10 ** 18;
+    const bridgedFromETH =
+      (
+        await sdk.api.erc20.balanceOf({
+          target: chainContracts.ethereum.issued[0],
+          owner: ethUSDTAddress,
+          block: _ethBlock,
+        })
+      ).output /
+      10 ** 6;
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      totalSupply - bridgedFromETH,
+      "bsc",
+      false,
+      "Tron"
+    );
     return balances;
   };
 }
@@ -339,9 +471,16 @@ async function liquidMinted() {
           "https://blockstream.info/liquid/api/asset/ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2"
         )
     );
+    console.info("liquid success USDT");
     const issued = res.data.chain_stats.issued_amount;
     const burned = res.data.chain_stats.burned_amount;
-    sumSingleBalance(balances, "peggedUSD", (issued - burned) / 10 ** 8);
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      (issued - burned) / 10 ** 8,
+      "issued",
+      false
+    );
     return balances;
   };
 }
@@ -360,6 +499,7 @@ async function algorandMinted() {
           "https://algoindexer.algoexplorerapi.io/v2/assets/312769"
         )
     );
+    console.info("algorand 1 success USDT");
     const supply = supplyRes.data.asset.params.total;
     const reserveRes = await retry(
       async (_bail: any) =>
@@ -367,12 +507,13 @@ async function algorandMinted() {
           "https://algoindexer.algoexplorerapi.io/v2/accounts/XIU7HGGAJ3QOTATPDSIIHPFVKMICXKHMOR2FJKHTVLII4FAOA3CYZQDLG4"
         )
     );
+    console.info("algorand 2 success USDT");
     const reserveAccount = reserveRes.data.account.assets.filter(
       (asset: any) => asset["asset-id"] === 312769
     );
     const reserves = reserveAccount[0].amount;
     const balance = (supply - reserves) / 10 ** 6;
-    sumSingleBalance(balances, "peggedUSD", balance);
+    sumSingleBalance(balances, "peggedUSD", balance, "issued", false);
     return balances;
   };
 }
@@ -394,7 +535,7 @@ async function omniMinted() {
     };
     const res = await retry(async (_bail: any) => await axios(options));
     const totalSupply = parseInt(res.data.properties[6].totaltokens);
-    sumSingleBalance(balances, "peggedUSD", totalSupply);
+    sumSingleBalance(balances, "peggedUSD", totalSupply, "issued", false);
     return balances;
   };
 }
@@ -432,7 +573,7 @@ async function tronMinted() {
     const totalSupply = await tronGetTotalSupply(
       chainContracts["tron"].issued[0]
     );
-    sumSingleBalance(balances, "peggedUSD", totalSupply);
+    sumSingleBalance(balances, "peggedUSD", totalSupply, "issued", false);
     return balances;
   };
 }
@@ -465,9 +606,10 @@ async function usdtApiMinted(key: string) {
       async (_bail: any) =>
         await axios("https://app.tether.to/transparency.json")
     );
+    console.info("tether API 1 success USDT");
     const issuance = res.data.data.usdt;
     const totalSupply = parseInt(issuance[key]);
-    sumSingleBalance(balances, "peggedUSD", totalSupply);
+    sumSingleBalance(balances, "peggedUSD", totalSupply, "issued", false);
     return balances;
   };
 }
@@ -483,6 +625,7 @@ async function usdtApiUnreleased(key: string) {
       async (_bail: any) =>
         await axios("https://app.tether.to/transparency.json")
     );
+    console.info("tether API 2 success USDT");
     const issuance = res.data.data.usdt;
     const totalSupply = parseInt(issuance[key]);
     sumSingleBalance(balances, "peggedUSD", totalSupply);
@@ -490,7 +633,7 @@ async function usdtApiUnreleased(key: string) {
   };
 }
 
-async function reinetworkMinted(address: string, decimals: number) {
+async function reinetworkBridged(address: string, decimals: number) {
   return async function (
     _timestamp: number,
     _ethBlock: number,
@@ -503,8 +646,150 @@ async function reinetworkMinted(address: string, decimals: number) {
           `https://scan.rei.network/api?module=token&action=getToken&contractaddress=${address}`
         )
     );
+    console.info("rei network success USDT");
     const totalSupply = parseInt(res.data.result.totalSupply) / 10 ** decimals;
-    sumSingleBalance(balances, "peggedUSD", totalSupply);
+    sumSingleBalance(balances, "peggedUSD", totalSupply, address, true);
+    return balances;
+  };
+}
+
+async function ontologyBridged() {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    const polyUSDTAddress = chainContracts.ontology.bridgedFromETH[0];
+    const polyUSDTReserveAddress = chainContracts.ontology.unreleased[0];
+    const polyNetworkSupply = await ontologyGetTotalSupply(
+      polyUSDTAddress,
+      "oep4"
+    );
+    const polyNetworkReserve = await ontologyGetBalance(
+      polyUSDTAddress,
+      "oep4",
+      polyUSDTReserveAddress
+    );
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      polyNetworkSupply - polyNetworkReserve,
+      polyUSDTAddress,
+      true
+    );
+
+    const celerUSDTAddress = chainContracts.ontology.bridgedFromETH[1];
+    const celerSupply = await ontologyGetTotalSupply(celerUSDTAddress, "orc20");
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      celerSupply,
+      celerUSDTAddress,
+      true
+    );
+    return balances;
+  };
+}
+
+async function nearBridged(address: string, decimals: number) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    const supply = await nearCall(address, "ft_total_supply");
+    console.info("Near success USDT")
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      supply / 10 ** decimals,
+      address,
+      true
+    );
+    return balances;
+  };
+}
+
+async function polyNetworkBridged(
+  chainID: number,
+  chainName: string,
+  assetName: string
+) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    const totalSupply = await pnGetTotalBridged(chainID, chainName, assetName);
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      totalSupply,
+      "polynetwork",
+      false,
+      "Ethereum"
+    );
+    return balances;
+  };
+}
+
+async function kavaBridged() {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    for (const contract of chainContracts.kava.bridgedFromETH) {
+      const totalSupply = await kavaGetTotalSupply(contract);
+      console.info("Kava success USDT")
+      sumSingleBalance(balances, "peggedUSD", totalSupply, contract, true);
+    }
+    return balances;
+  };
+}
+
+async function aptosBridged() {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    const contractStargate =
+      "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa";
+    const typeStargate =
+      "0x1::coin::CoinInfo<0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa::asset::USDT>";
+    const totalSupplyStargate = await aptosGetTotalSupply(
+      contractStargate,
+      typeStargate
+    );
+    console.info("Aptos success USDT")
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      totalSupplyStargate,
+      contractStargate,
+      true
+    );
+    const contractPortal =
+      "0xa2eda21a58856fda86451436513b867c97eecb4ba099da5775520e0f7492e852";
+    const typePortal =
+      "0x1::coin::CoinInfo<0xa2eda21a58856fda86451436513b867c97eecb4ba099da5775520e0f7492e852::coin::T>";
+    const totalSupplyPortal = await aptosGetTotalSupply(
+      contractPortal,
+      typePortal
+    );
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      totalSupplyPortal,
+      contractPortal,
+      true
+    );
     return balances;
   };
 }
@@ -537,7 +822,7 @@ const adapter: PeggedIssuanceAdapter = {
   bsc: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    ethereum: multiFunctionBalance(
+    ethereum: sumMultipleBalanceFunctions(
       [
         supplyInEthereumBridge(
           chainContracts.ethereum.issued[0],
@@ -550,6 +835,10 @@ const adapter: PeggedIssuanceAdapter = {
     ),
     avalanche: bridgedSupply("bsc", 6, chainContracts.bsc.bridgedFromAvax),
     solana: bridgedSupply("bsc", 6, chainContracts.bsc.bridgedFromSol),
+    tron: bscBridgedFromTron(
+      chainContracts.bsc.bridgedFromETHAndTron[0],
+      chainContracts.bsc.bridgeOnETH[0]
+    ),
   },
   avalanche: {
     minted: chainMinted("avax", 6),
@@ -621,11 +910,13 @@ const adapter: PeggedIssuanceAdapter = {
   harmony: {
     minted: async () => ({}),
     unreleased: async () => ({}),
+    /* hacked, trading at $0.06
     ethereum: bridgedSupply(
       "harmony",
       6,
       chainContracts.harmony.bridgedFromETH
     ),
+    */
   },
   syscoin: {
     minted: async () => ({}),
@@ -689,8 +980,14 @@ const adapter: PeggedIssuanceAdapter = {
     ),
   },
   omni: {
-    minted: omniMinted(),
-    unreleased: omniUnreleased(),
+    minted: usdtApiMinted("totaltokens_omni"),
+    unreleased: sumMultipleBalanceFunctions(
+      [
+        usdtApiUnreleased("reserve_balance_omni"),
+        usdtApiUnreleased("quarantined_omni"),
+      ],
+      "peggedUSD"
+    ),
   },
   tron: {
     minted: tronMinted(),
@@ -699,7 +996,7 @@ const adapter: PeggedIssuanceAdapter = {
   aurora: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    ethereum: bridgedSupply("aurora", 6, chainContracts.aurora.bridgedFromETH),
+    near: bridgedSupply("aurora", 6, chainContracts.aurora.bridgedFromNear),
   },
   telos: {
     minted: async () => ({}),
@@ -756,7 +1053,19 @@ const adapter: PeggedIssuanceAdapter = {
   oasis: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    ethereum: bridgedSupply("oasis", 6, chainContracts.oasis.bridgedFromETH),
+    ethereum: sumMultipleBalanceFunctions(
+      [
+        bridgedSupply("oasis", 6, [chainContracts.oasis.bridgedFromETH[0]]),
+        bridgedSupply(
+          "oasis",
+          6,
+          [chainContracts.oasis.bridgedFromETH[1]],
+          "celer",
+          "Ethereum"
+        ),
+      ],
+      "peggedUSD"
+    ),
     solana: bridgedSupply("oasis", 6, chainContracts.oasis.bridgedFromSol),
     bsc: bridgedSupply("oasis", 18, chainContracts.oasis.bridgedFromBSC),
     polygon: bridgedSupply("oasis", 6, chainContracts.oasis.bridgedFromPolygon),
@@ -797,7 +1106,7 @@ const adapter: PeggedIssuanceAdapter = {
   reinetwork: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    ethereum: reinetworkMinted(chainContracts.reinetwork.bridgedFromETH[0], 6),
+    ethereum: reinetworkBridged(chainContracts.reinetwork.bridgedFromETH[0], 6),
   },
   loopring: {
     minted: async () => ({}),
@@ -826,6 +1135,120 @@ const adapter: PeggedIssuanceAdapter = {
     minted: async () => ({}),
     unreleased: async () => ({}),
     ethereum: bridgedSupply("fantom", 6, chainContracts.fantom.bridgedFromETH),
+  },
+  celo: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: sumMultipleBalanceFunctions(
+      [
+        bridgedSupply("celo", 6, chainContracts.celo.bridgedFromETH6Decimals),
+        bridgedSupply("celo", 18, chainContracts.celo.bridgedFromETH18Decimals),
+      ],
+      "peggedUSD"
+    ),
+  },
+  kava: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: kavaBridged(),
+  },
+  ontology: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: ontologyBridged(),
+  },
+  sx: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply("sx", 6, chainContracts.sx.bridgedFromETH),
+  },
+  ethereumclassic: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply(
+      "ethereumclassic",
+      6,
+      chainContracts.ethereumclassic.bridgedFromETH
+    ),
+  },
+  tezos: {
+    minted: usdtApiMinted("totaltokens_tezos"),
+    unreleased: usdtApiUnreleased("reserve_balance_tezos"),
+  },
+  near: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: nearBridged(chainContracts.near.bridgedFromETH[0], 6),
+  },
+  wan: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: supplyInEthereumBridge(
+      chainContracts.ethereum.issued[0],
+      chainContracts.wan.bridgeOnETH[0],
+      6
+    ),
+  },
+  defichain: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: supplyInEthereumBridge(
+      chainContracts.ethereum.issued[0],
+      chainContracts.defichain.bridgeOnETH[0],
+      6
+    ),
+  },
+  klaytn: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply("klaytn", 6, chainContracts.klaytn.bridgedFromETH),
+  },
+  canto: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply("canto", 6, chainContracts.canto.bridgedFromETH),
+  },
+  everscale: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: supplyInEthereumBridge(
+      chainContracts.ethereum.issued[0],
+      chainContracts.everscale.bridgeOnETH[0],
+      6
+    ),
+  },
+  dogechain: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply(
+      "dogechain",
+      6,
+      chainContracts.dogechain.bridgedFromETH
+    ),
+  },
+  neo: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: polyNetworkBridged(4, "Neo", "pnUSDT"),
+  },
+  zilliqa: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: polyNetworkBridged(18, "Zilliqa", "zUSDT"),
+  },
+  arbitrum_nova: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply(
+      "arbitrum_nova",
+      6,
+      chainContracts.arbitrum_nova.bridgedFromETH
+    ),
+  },
+  aptos: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: aptosBridged(),
   },
 };
 

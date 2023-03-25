@@ -1,7 +1,13 @@
-const normalizedChainReplacements = {
+export const normalizedChainReplacements = {
   binance: "bsc",
   wanchain: "wan",
   kucoin: "kcc",
+  gnosis: "xdai",
+  "terra%20classic": "terra",
+  sxnetwork: "sx",
+  "arbitrum%20nova":"arbitrum_nova",
+  ethereumpow: "ethpow",
+  "milkomeda%20c1": "milkomeda",
 } as {
   [chain: string]: string;
 };
@@ -115,7 +121,7 @@ export const chainCoingeckoIds = {
     categories: ["EVM"],
     chainId: 137,
   },
-  Terra: {
+  "Terra Classic": {
     geckoId: "terra-luna",
     symbol: "LUNA",
     cmcId: "4172",
@@ -728,6 +734,17 @@ export const chainCoingeckoIds = {
     categories: ["EVM"],
     chainId: 2001,
   },
+  "Milkomeda C1": {
+    geckoId: null,
+    symbol: null,
+    cmcId: null,
+    categories: ["EVM"],
+    parent: {
+      chain: "Cardano",
+      types: ["gas"],
+    },
+    chainId: 2001,
+  },
   DFK: {
     geckoId: "defi-kingdoms",
     symbol: "JEWEL",
@@ -781,6 +798,85 @@ export const chainCoingeckoIds = {
     categories: ["Rollup"],
     parent: "Ethereum",
   },
+  StarkNet: {
+    geckoId: null,
+    symbol: null,
+    cmcId: null,
+    categories: ["Rollup"],
+    parent: "Ethereum",
+  },
+  Acala: {
+    geckoId: "acala",
+    symbol: "ACA",
+    cmcId: "6756",
+    categories: ["EVM", "Parachain"],
+    parent: "Polkadot",
+  },
+  SXnetwork: {
+    geckoId: "sx-network",
+    symbol: "SX",
+    cmcId: "8377",
+    categories: ["EVM", "Rollup"],
+    parent: {
+      chain: "Polygon",
+      types: ["L2", "gas"],
+    },
+  },
+  Heiko: {
+    geckoId: null,
+    symbol: "HKO",
+    cmcId: null,
+    categories: ["Parachain"],
+    parent: {
+      chain: "Kusama",
+      types: ["parachain"],
+    },
+  },
+  Dogechain: {
+    geckoId: "dogechain",
+    symbol: "DG",
+    cmcId: null,
+    categories: ["EVM"],
+  },
+  Canto: {
+    geckoId: null,
+    symbol: null,
+    cmcId: null,
+    categories: ["EVM"],
+  },
+  Ripple: {
+    geckoId: "ripple",
+    symbol: "XRP",
+    cmcId: "52",
+  },
+  "Arbitrum Nova": {
+    geckoId: null,
+    symbol: null,
+    cmcId: null,
+    categories: ["EVM", "Rollup"],
+    parent: {
+      chain: "Ethereum",
+      types: ["L2", "gas"],
+    },
+    chainId: 42170,
+  },
+  Kujira: {
+    geckoId: "kujira",
+    symbol: "KUJI",
+    cmcId: "15185",
+    categories: ["Cosmos"],
+  },
+  EthereumPoW: {
+    geckoId: "ethereum-pow-iou",
+    symbol: "ETHW",
+    cmcId: "21296",
+    categories: ["EVM"],
+  },
+  Aptos: {
+    geckoId: "aptos",
+    symbol: "APT",
+    cmcId: "21794",
+  },
 } as {
   [chain: string]: {
     geckoId: string | null;
@@ -812,6 +908,8 @@ export function transformNewChainName(chain: string) {
       return "Gnosis";
     case "Cosmos":
       return "CosmosHub";
+    case "Milkomeda":
+      return "Milkomeda C1";
     default:
       return chain;
   }
@@ -958,7 +1056,7 @@ export function getChainDisplayName(
     case "vite":
       return "Vite";
     case "milkomeda":
-      return "Milkomeda";
+      return useNewChainNames ? "Milkomeda C1" : "Milkomeda";
     case "dfk":
       return "DFK";
     case "omni":
@@ -977,7 +1075,30 @@ export function getChainDisplayName(
       return "Loopring";
     case "aztec":
       return "Aztec";
-
+    case "starknet":
+      return "StarkNet";
+    case "acala":
+      return "Acala";
+    case "terra":
+      return "Terra Classic";
+    case "sx":
+      return "SXnetwork";
+    case "heiko":
+      return "Heiko";
+    case "dogechain":
+      return "Dogechain";
+    case "canto":
+      return "Canto";
+    case "ripple":
+      return "Ripple";
+    case "arbitrum_nova":
+      return "Arbitrum Nova";
+    case "kujira":
+      return "Kujira";
+    case "ethpow":
+      return "EthereumPoW";
+    case "aptos":
+      return "Aptos";
     default:
       return (
         normalizedChain.slice(0, 1).toUpperCase() + normalizedChain.slice(1)

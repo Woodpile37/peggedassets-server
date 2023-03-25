@@ -1,4 +1,8 @@
-import type { Balances, ChainBlocks } from "../peggedAsset.type";
+import type {
+  Balances,
+  ChainBlocks,
+  PeggedAssetType,
+} from "../peggedAsset.type";
 const sdk = require("@defillama/sdk");
 import { sumSingleBalance } from "./generalUtil";
 import { getTokenSupply as solanaGetTokenSupply } from "../llama-helper/solana";
@@ -6,10 +10,15 @@ import { totalSupply as terraGetTotalSupply } from "../llama-helper/terra"; // N
 const axios = require("axios");
 const retry = require("async-retry");
 
+type BridgeAndReserveAddressPair = [string, string[]];
+
 export async function bridgedSupply(
   chain: string,
   decimals: number,
-  addresses: string[]
+  addresses: string[],
+  bridgeName?: string,
+  bridgedFromChain?: string,
+  pegType?: PeggedAssetType
 ) {
   return async function (
     _timestamp: number,
@@ -17,17 +26,93 @@ export async function bridgedSupply(
     _chainBlocks: ChainBlocks
   ) {
     let balances = {} as Balances;
+    let assetPegType = pegType ? pegType : ("peggedUSD" as PeggedAssetType);
     for (let address of addresses) {
       const totalSupply = (
         await sdk.api.abi.call({
           abi: "erc20:totalSupply",
           target: address,
-          block: _chainBlocks[chain],
+          block: _chainBlocks?.[chain],
           chain: chain,
         })
       ).output;
-      sumSingleBalance(balances, "peggedUSD", totalSupply / 10 ** decimals);
+      bridgeName
+        ? sumSingleBalance(
+            balances,
+            assetPegType,
+            totalSupply / 10 ** decimals,
+            bridgeName,
+            false,
+            bridgedFromChain
+          )
+        : sumSingleBalance(
+            balances,
+            assetPegType,
+            totalSupply / 10 ** decimals,
+            address,
+            true
+          );
     }
+    return balances;
+  };
+}
+
+export async function bridgedSupplySubtractReserve(
+  chain: string,
+  decimals: number,
+  bridgeAndReserveAddresses: BridgeAndReserveAddressPair,
+  bridgeName?: string,
+  bridgedFromChain?: string,
+  pegType?: PeggedAssetType
+) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    let assetPegType = pegType ? pegType : ("peggedUSD" as PeggedAssetType);
+    let sum = 0;
+    const bridgeAddress = bridgeAndReserveAddresses[0];
+    const reserveAddresses = bridgeAndReserveAddresses[1];
+    const totalSupply = (
+      await sdk.api.abi.call({
+        abi: "erc20:totalSupply",
+        target: bridgeAddress,
+        block: _chainBlocks?.[chain],
+        chain: chain,
+      })
+    ).output;
+    sum += totalSupply;
+    for (let reserve of reserveAddresses) {
+      const totalReserve = reserve
+        ? (
+            await sdk.api.erc20.balanceOf({
+              target: bridgeAddress,
+              owner: reserve,
+              block: _chainBlocks?.[chain],
+              chain: chain,
+            })
+          ).output
+        : 0;
+      sum -= totalReserve;
+    }
+    bridgeName
+      ? sumSingleBalance(
+          balances,
+          assetPegType,
+          sum / 10 ** decimals,
+          bridgeName,
+          false,
+          bridgedFromChain
+        )
+      : sumSingleBalance(
+          balances,
+          assetPegType,
+          sum / 10 ** decimals,
+          bridgeAddress,
+          true
+        );
     return balances;
   };
 }
@@ -35,7 +120,8 @@ export async function bridgedSupply(
 export async function supplyInEthereumBridge(
   target: string,
   owner: string,
-  decimals: number
+  decimals: number,
+  pegType?: PeggedAssetType
 ) {
   return async function (
     _timestamp: number,
@@ -43,6 +129,7 @@ export async function supplyInEthereumBridge(
     _chainBlocks: ChainBlocks
   ) {
     let balances = {} as Balances;
+    let assetPegType = pegType ? pegType : ("peggedUSD" as PeggedAssetType);
     const bridged = (
       await sdk.api.erc20.balanceOf({
         target: target,
@@ -50,21 +137,28 @@ export async function supplyInEthereumBridge(
         block: _ethBlock,
       })
     ).output;
-    sumSingleBalance(balances, "peggedUSD", bridged / 10 ** decimals);
+    sumSingleBalance(
+      balances,
+      assetPegType,
+      bridged / 10 ** decimals,
+      owner,
+      true
+    );
     return balances;
   };
 }
 
-export async function solanaMintedOrBridged(targets: string[]) {
+export async function solanaMintedOrBridged(targets: string[], pegType?: PeggedAssetType) {
   return async function (
     _timestamp: number,
     _ethBlock: number,
-    _chainBlocks: ChainBlocks
+    _chainBlocks: ChainBlocks,
   ) {
     let balances = {} as Balances;
+    let assetPegType = pegType ? pegType : ("peggedUSD" as PeggedAssetType);
     for (let target of targets) {
       const totalSupply = await solanaGetTokenSupply(target);
-      sumSingleBalance(balances, "peggedUSD", totalSupply);
+      sumSingleBalance(balances, assetPegType, totalSupply, target, true);
     }
     return balances;
   };
@@ -80,15 +174,21 @@ export async function terraSupply(addresses: string[], decimals: number) {
     for (let address of addresses) {
       const totalSupply = await terraGetTotalSupply(
         address,
-        _chainBlocks["terra"]
+        _chainBlocks?.["terra"]
       );
-      sumSingleBalance(balances, "peggedUSD", totalSupply / 10 ** decimals);
+      sumSingleBalance(
+        balances,
+        "peggedUSD",
+        totalSupply / 10 ** decimals,
+        address,
+        true
+      );
     }
     return balances;
   };
 }
 
-export async function osmosisSupply(token: string) {
+export async function osmosisSupply(token: string, bridgeName: string, bridgedFrom: string) {
   return async function (
     _timestamp: number,
     _ethBlock: number,
@@ -100,7 +200,7 @@ export async function osmosisSupply(token: string) {
         await axios.get(`https://api-osmosis.imperator.co/tokens/v2/${token}`)
     );
     const totalSupply = res.data[0].liquidity;
-    sumSingleBalance(balances, "peggedUSD", totalSupply);
+    sumSingleBalance(balances, "peggedUSD", totalSupply, bridgeName, false, bridgedFrom);
     return balances;
   };
 }

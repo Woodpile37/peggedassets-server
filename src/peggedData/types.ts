@@ -1,54 +1,47 @@
-export interface Protocol {
+type PegType =
+  | "peggedUSD"
+  | "peggedVAR"
+  | "peggedEUR"
+  | "peggedSGD"
+  | "peggedJPY"
+  | "peggedCNY";
+type PegMechanism = "algorithmic" | "fiat-backed" | "crypto-backed";
+export type PriceSource =
+  | "chainlink"
+  | "uniswap"
+  | "dexscreener"
+  | "curve"
+  | "coingecko"
+  | "birdeye"
+  | "kucoin"
+  | "defillama"
+  | "kaddex";
+
+export type PeggedAsset = {
   id: string;
   name: string;
   address: string;
   symbol: string;
   url: string;
   description: string;
-  chain: string;
-  logo: null | string;
-  audits: null | "0" | "1" | "2" | "3";
-  audit_note: null;
+  mintRedeemDescription: string;
+  onCoinGecko: string;
   gecko_id: string;
   cmcId: string;
-  category: string;
-  chains: string[];
-  oracles: string[];
-  forkedFrom: string[];
-  module: string;
+  pegType: PegType;
+  pegMechanism: PegMechanism;
+  priceSource: PriceSource;
+  auditLinks: string[];
   twitter: string;
-  language?: string;
-  audit_links?: string[];
-  listedAt?: number;
-  openSource?: boolean;
-}
-
-type Bridges = {
-  [chain: string]: {
-    bridge: string;
-    link?: string;
-  };
+  wiki: string;
+  delisted?: boolean;
 };
 
-type PeggedCategory = "stablecoins";
-type PegType = "peggedUSD";
-export type PriceSource = 'chainlink' | 'uniswap'
-
-export interface PeggedAsset {
-  id: string;
+type Bridge = {
   name: string;
-  address: string;
-  symbol: string;
-  url: string;
-  description: string;
-  chain: string;
-  logo: null | string;
-  gecko_id: string;
-  cmcId: string;
-  category: PeggedCategory;
-  pegType: PegType;
-  priceSource: PriceSource;
-  chains: string[];
-  bridges: Bridges;
-  twitter: string;
-}
+  link?: string;
+};
+
+export type BridgeInfo = {
+  [bridgeID: string]: Bridge;
+};

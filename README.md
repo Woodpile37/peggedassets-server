@@ -3,13 +3,14 @@
 ## How to list a new pegged asset
 
 1. Fork this repository.
-2. Create folder in `src/adapters/peggedAssets` with the same name as the CoinGecko id for the pegged asset.
-3. In that folder, write an adapter in Typescript and name it index.ts (see below for spec).
-4. In `src/adapters/peggedAssets`, `npm i` and then test your adapter with `npx ts-node test YOURPEGGEDASSET/index peggedXYZ`, where "peggedXYZ" is the key of the balance object returned by your adapter.
-5. Import your adapter in `src/adapters/peggedAssets/index.ts` and then add it to the exports.
-6. (Optional) if the pegged asset has a ChainLink price feed, you can add the ChainLink smart contract info to `src/adapters/peggedAssets/prices/index.ts`.
+2. `npm i` in root folder.
+3. Create folder in `src/adapters/peggedAssets` with the same name as the CoinGecko id for the pegged asset.
+4. In that folder, write an adapter in Typescript and name it index.ts (see below for spec).
+5. In `src/adapters/peggedAssets`, `npm i` and then test your adapter with `npx ts-node test YOURPEGGEDASSET/index peggedXYZ`, where "peggedXYZ" is the key of the balance object returned by your adapter.
+6. Import your adapter in `src/adapters/peggedAssets/index.ts` and then add it to the exports.
+7. (Optional) if the pegged asset has a ChainLink price feed or a liquid Uniswap V3 pool, you can add the ChainLink smart contract/Uniswap V3 pool info to `src/adapters/peggedAssets/prices/index.ts`.
 
-After submitting a PR, you can submit basic info about the pegged asset (website, ticker, icon, etc.) in the [Defillama Discord](https://discord.gg/defillama).
+After submitting a PR, you can submit basic info about the pegged asset (website, ticker, icon, etc.) in the [Defillama Discord](https://discord.defillama.com/).
 
 ## Pegged asset adapters
 
@@ -36,7 +37,7 @@ The `minted` and `unreleased` properties are required to be present on every cha
 
 The `bridgedFromChain` properties are optional. The property name should simply be the name of the chain the pegged assets are bridged from.
 
-The async functions should take timestamp, ethBlock, and chainBlocks as parameters, just like Defillama TVL Adapters. They must return an object `{ peggedXYZ: x }`, where `peggedXYZ` is a supported pegged asset type, and `x` is a Number. Currently only `peggedUSD` is supported.
+The async functions should take timestamp, ethBlock, and chainBlocks as parameters, just like Defillama TVL Adapters. They must return an object `{ peggedXYZ: x }`, where `peggedXYZ` is a supported pegged asset type, and `x` is a Number. Currently only `peggedUSD`, `peggedEUR`, and `peggedVAR` (variable peg) are supported.
 
 Here is an example adapter:
 	

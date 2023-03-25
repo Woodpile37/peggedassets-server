@@ -1,15 +1,23 @@
 const sdk = require("@defillama/sdk");
-import { sumSingleBalance } from "../helper/generalUtil";
+import {
+  sumMultipleBalanceFunctions,
+  sumSingleBalance,
+} from "../helper/generalUtil";
 import {
   bridgedSupply,
   solanaMintedOrBridged,
   terraSupply,
+  supplyInEthereumBridge,
 } from "../helper/getSupply";
+import { call as nearCall } from "../llama-helper/near";
+import { getTotalBridged as pnGetTotalBridged } from "../helper/polynetwork";
 import {
   ChainBlocks,
   PeggedIssuanceAdapter,
   Balances,
 } from "../peggedAsset.type";
+const axios = require("axios");
+const retry = require("async-retry");
 
 type ChainContracts = {
   [chain: string]: {
@@ -30,6 +38,8 @@ const chainContracts: ChainContracts = {
     ],
   },
   avax: {
+    issued: ["0x9C9e5fD8bbc25984B178FdCE6117Defa39d2db39"],
+    reserves: ["0x4A13E986a4B8E123721aA1F621E046fe3b74F724"], // owner of the native "issued" contract
     bridgeOnETH: ["0xe78388b4ce79068e89bf8aa7f218ef6b9ab0e9d0"],
     bridgedFromETH: ["0x19860ccb0a68fd4213ab9d8266f7bbf05a8dde98"],
     bridgedFromBSC: ["0xA41a6c7E25DdD361343e8Cb8cFa579bbE5eEdb7a"], // wormhole
@@ -60,6 +70,8 @@ const chainContracts: ChainContracts = {
     ],
   },
   polygon: {
+    issued: ["0x9C9e5fD8bbc25984B178FdCE6117Defa39d2db39"],
+    reserves: ["0x4a13e986a4b8e123721aa1f621e046fe3b74f724"], // owner of native "issued" contract
     bridgedFromBSC: [
       "0x9fb83c0635de2e815fd1c21b3a292277540c2e8d", // multichain
       "0xA8D394fE7380b8cE6145d5f85E6aC22d4E91ACDe", // wormhole
@@ -129,6 +141,29 @@ const chainContracts: ChainContracts = {
   theta: {
     bridgedFromBSC: ["0x7B37d0787A3424A0810E02b24743a45eBd5530B2"], // multichain
   },
+  kava: {
+    bridgeOnBNB: [
+      "bnb1skl4n4vrzx3ty9ujaut8rmkhkmtl4t04ysllfm", // cold wallets on BNB chain
+      "bnb10zq89008gmedc6rrwzdfukjk94swynd7dl97w8",
+    ],
+  },
+  loopring: {
+    bridgeOnETH: ["0x674bdf20A0F284D710BC40872100128e2d66Bd3f"],
+  },
+  ethereumclassic: {
+    bridgedFromETH: ["0xb12c13e66AdE1F72f71834f2FC5082Db8C091358"], // multichain
+  },
+  near: {
+    bridgedFromETH: [
+      "4fabb145d64652a948d72533023f6e7a623c7c53.factory.bridge.near",
+    ], // rainbow bridge
+  },
+  klaytn: {
+    bridgedFromBSC: ["0x210bc03f49052169d5588a52c317f71cf2078b85"], // orbit
+  },
+  dogechain: {
+    bridgedFromETH: ["0x332730a4F6E03D9C55829435f10360E13cfA41Ff"], // multichain
+  },
 };
 
 /*
@@ -157,12 +192,112 @@ async function chainMinted(chain: string, decimals: number) {
         await sdk.api.abi.call({
           abi: "erc20:totalSupply",
           target: issued,
-          block: _chainBlocks[chain],
+          block: _chainBlocks?.[chain],
           chain: chain,
         })
       ).output;
-      sumSingleBalance(balances, "peggedUSD", totalSupply / 10 ** decimals);
+      sumSingleBalance(
+        balances,
+        "peggedUSD",
+        totalSupply / 10 ** decimals,
+        "issued",
+        false
+      );
     }
+    return balances;
+  };
+}
+
+async function kavaMinted(owners: string[]) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    for (let owner of owners) {
+      const res = await retry(
+        async (_bail: any) =>
+          await axios.get(`https://dex.binance.org/api/v1/account/${owner}`)
+      );
+      const balanceObject = res.data.balances.filter(
+        (obj: any) => obj.symbol === "BUSD-BD1"
+      );
+      const circulating = parseInt(balanceObject[0].free);
+      if (typeof circulating !== "number") {
+        throw new Error("Binance Chain API for TUSD is broken.");
+      }
+      sumSingleBalance(balances, "peggedUSD", circulating, owner, true);
+    }
+    return balances;
+  };
+}
+
+async function nearBridged(address: string, decimals: number) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    const supply = await nearCall(address, "ft_total_supply");
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      supply / 10 ** decimals,
+      address,
+      true
+    );
+    return balances;
+  };
+}
+
+async function polyNetworkBridged(
+  chainID: number,
+  chainName: string,
+  assetName: string
+) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+    const totalSupply = await pnGetTotalBridged(chainID, chainName, assetName);
+    sumSingleBalance(
+      balances,
+      "peggedUSD",
+      totalSupply,
+      "polynetwork",
+      false,
+      "BSC"
+    );
+    return balances;
+  };
+}
+
+async function chainUnreleased(chain: string, decimals: number) {
+  return async function (
+    _timestamp: number,
+    _ethBlock: number,
+    _chainBlocks: ChainBlocks
+  ) {
+    let balances = {} as Balances;
+      const reserve = (
+        await sdk.api.erc20.balanceOf({
+          target: chainContracts[chain].issued[0],
+          owner: chainContracts[chain].reserves[0],
+          block: _chainBlocks?.[chain],
+          chain: chain,
+        })
+      ).output;
+      sumSingleBalance(
+        balances,
+        "peggedUSD",
+        reserve / 10 ** decimals,
+        "issued",
+        false
+      );
     return balances;
   };
 }
@@ -179,19 +314,21 @@ const adapter: PeggedIssuanceAdapter = {
     ethereum: bridgedSupply("bsc", 18, chainContracts.bsc.bridgedFromETH),
   },
   avalanche: {
-    minted: async () => ({}),
-    unreleased: async () => ({}),
+    minted: chainMinted("avax", 18),
+    unreleased: chainUnreleased("avax", 18),
     ethereum: bridgedSupply("avax", 18, chainContracts.avax.bridgedFromETH),
     bsc: bridgedSupply("avax", 18, chainContracts.avax.bridgedFromBSC),
   },
   harmony: {
     minted: async () => ({}),
     unreleased: async () => ({}),
+    /* appears to now be unbacked due to hack
     ethereum: bridgedSupply(
       "harmony",
       18,
       chainContracts.harmony.bridgedFromETH
     ),
+      */
   },
   iotex: {
     minted: async () => ({}),
@@ -223,8 +360,8 @@ const adapter: PeggedIssuanceAdapter = {
     bsc: solanaMintedOrBridged(chainContracts.solana.bridgedFromBSC),
   },
   polygon: {
-    minted: async () => ({}),
-    unreleased: async () => ({}),
+    minted: chainMinted("polygon", 18),
+    unreleased: chainUnreleased("polygon", 18),
     bsc: bridgedSupply("polygon", 18, chainContracts.polygon.bridgedFromBSC),
   },
   fuse: {
@@ -299,7 +436,13 @@ const adapter: PeggedIssuanceAdapter = {
   metis: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    bsc: bridgedSupply("metis", 18, chainContracts.metis.bridgedFromBSC),
+    bsc: sumMultipleBalanceFunctions(
+      [
+        bridgedSupply("metis", 18, chainContracts.metis.bridgedFromBSC),
+        polyNetworkBridged(24, "Andromeda", "BUSD"),
+      ],
+      "peggedUSD"
+    ),
   },
   fantom: {
     minted: async () => ({}),
@@ -319,7 +462,55 @@ const adapter: PeggedIssuanceAdapter = {
   theta: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    bsc: bridgedSupply("theta", 18, chainContracts.theta.bridgedFromBSC),
+    bsc: bridgedSupply(
+      "theta",
+      18,
+      chainContracts.theta.bridgedFromBSC,
+      "multichain",
+      "BSC"
+    ),
+  },
+  kava: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    bsc: kavaMinted(chainContracts.kava.bridgeOnBNB), 
+  },
+  loopring: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: supplyInEthereumBridge(
+      chainContracts.ethereum.issued[0],
+      chainContracts.loopring.bridgeOnETH[0],
+      18
+    ),
+  },
+  ethereumclassic: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply(
+      "ethereumclassic",
+      18,
+      chainContracts.ethereumclassic.bridgedFromETH
+    ),
+  },
+  near: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: nearBridged(chainContracts.near.bridgedFromETH[0], 18),
+  },
+  klaytn: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    bsc: bridgedSupply("klaytn", 18, chainContracts.klaytn.bridgedFromBSC),
+  },
+  dogechain: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    ethereum: bridgedSupply(
+      "dogechain",
+      18,
+      chainContracts.dogechain.bridgedFromETH
+    ),
   },
 };
 

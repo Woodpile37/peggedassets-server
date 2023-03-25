@@ -2,9 +2,9 @@ import AWS from "aws-sdk";
 import sleep from "./sleep";
 
 const client = new AWS.DynamoDB.DocumentClient({
-  region: "us-east-1",
+  region: "eu-central-1",
 });
-export const TableName = "prod-table";
+export const TableName = "prod-stablecoins-table";
 
 const dynamodb = {
   get: (
@@ -37,9 +37,9 @@ const dynamodb = {
 };
 export default dynamodb;
 
-export async function getHistoricalValues(pk: string) {
+export async function getHistoricalValues(pk: string, initialSK?: number) {
   let items = [] as any[];
-  let lastKey = -1;
+  let lastKey = initialSK ? initialSK : -1;
   do {
     const result = await dynamodb.query({
       ExpressionAttributeValues: {

@@ -8,9 +8,9 @@ import {
 } from "../../utils/date";
 import { PeggedAssetIssuance } from "../../types";
 import getTVLOfRecordClosestToTimestamp from "../../utils/shared/getRecordClosestToTimestamp";
-import { reportError } from "../../utils/error";
 import { getLastRecord } from "../utils/getLastRecord";
 import { humanizeNumber } from "@defillama/sdk/build/computeTVL/humanizeNumber";
+import { executeAndIgnoreErrors } from "./errorDb";
 
 type PKconverted = (id: string) => string;
 
@@ -23,6 +23,7 @@ export default async (
 ) => {
   const hourlyPK = hourlyPeggedBalances(peggedAsset.id);
   const pegType = peggedAsset.pegType;
+  const peggedID = peggedAsset.gecko_id;
   if (Object.keys(peggedBalances).length === 0) {
     return;
   }
@@ -50,15 +51,26 @@ export default async (
       lastHourlyCirculating
     )} to ${humanizeNumber(currentCirculating)}`;
     if (
-      Math.abs(lastHourlyPeggedObject.SK - unixTimestamp) < 5 * HOUR &&
-      lastHourlyCirculating * 5 < currentCirculating
+      Math.abs(lastHourlyPeggedObject.SK - unixTimestamp) < 24 * HOUR &&
+      lastHourlyCirculating * 5 < currentCirculating &&
+      lastHourlyCirculating > 1000000
     ) {
+      await executeAndIgnoreErrors("INSERT INTO `errors` VALUES (?, ?, ?)", [
+        unixTimestamp,
+        peggedID,
+        `Circulating has 5x (${change}) within one hour, disabling it`,
+      ]);
       throw new Error(
-        `Pegged circulating for ${peggedAsset.name} has 5x (${change}) within one hour, disabling it`
+        `Circulating for ${peggedAsset.name} has 5x (${change}) within one hour, disabling it`
       );
     } else {
-      reportError(
-        `Pegged circulating for ${peggedAsset.name} has >2x (${change})`,
+      await executeAndIgnoreErrors("INSERT INTO `errors` VALUES (?, ?, ?)", [
+        unixTimestamp,
+        peggedID,
+        `Circulating has >2x (${change}) within one hour`,
+      ]);
+      console.error(
+        `Circulating for ${peggedAsset.name} has >2x (${change}) within one hour`,
         peggedAsset.name
       );
     }
@@ -73,8 +85,13 @@ export default async (
         prevCirculating !== 0 &&
         prevCirculating !== undefined
       ) {
-        reportError(
-          `Pegged circulating has dropped to 0 on chain "${chain}" (previous circulating was ${prevCirculating})`,
+        await executeAndIgnoreErrors("INSERT INTO `errors` VALUES (?, ?, ?)", [
+          unixTimestamp,
+          peggedID,
+          `Circulating has dropped to 0 on chain "${chain}" (previous circulating was ${prevCirculating})`,
+        ]);
+        console.error(
+          `Circulating has dropped to 0 on chain "${chain}" (previous circulating was ${prevCirculating})`,
           peggedAsset.name
         );
       }

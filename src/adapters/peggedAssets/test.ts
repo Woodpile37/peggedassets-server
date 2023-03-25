@@ -17,7 +17,7 @@ type BridgeMapping = {
   [chain: string]: PeggedTokenBalance[];
 };
 
-const pegTypes = ["peggedUSD"];
+const pegTypes = ["peggedUSD", "peggedEUR", "peggedVAR"];
 
 async function getLatestBlockRetry(chain: string) {
   for (let i = 0; i < 5; i++) {
@@ -56,6 +56,13 @@ async function getPeggedAsset(
   if (typeof balance[pegType] !== "number" || Number.isNaN(balance[pegType])) {
     throw new Error(
       `Pegged balance is not a number, instead it is ${balance[pegType]}. Make sure balance object is exported with key from: ${pegTypes}.`
+    );
+  }
+  const bridges = balance.bridges;
+  if (!bridges) {
+    console.error(
+      `${errorString}
+      Bridge data not found on chain ${chain}. Use sumSingleBalance from helper/generalUtil to add bridge data.`
     );
   }
   peggedBalances[chain][issuanceType] = balance;

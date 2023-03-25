@@ -1,5 +1,8 @@
 const sdk = require("@defillama/sdk");
-import { multiFunctionBalance, sumSingleBalance } from "../helper/generalUtil";
+import {
+  sumMultipleBalanceFunctions,
+  sumSingleBalance,
+} from "../helper/generalUtil";
 import {
   bridgedSupply,
   solanaMintedOrBridged,
@@ -73,6 +76,18 @@ const chainContracts: ChainContracts = {
   fuse: {
     bridgedFromTerra: ["0x0D58a44be3dCA0aB449965dcc2c46932547Fea2f"], // allbridge
   },
+  arbitrum: {
+    bridgedFromTerra: ["0x13780e6d5696dd91454f6d3bbc2616687fea43d0"], // synapse
+  },
+  optimism: {
+    bridgedFromTerra: ["0xfb21b70922b9f6e3c6274bcd6cb1aa8a0fe20b80"], // synapse
+  },
+  metis: {
+    bridgedFromTerra: ["0x0b5740c6b4a97f90ef2f0220651cca420b868ffb"], // synapse
+  },
+  dfk: {
+    bridgedFromTerra: ["0x360d6dd540e3448371876662fbe7f1acaf08c5ab"], // synapse
+  },
 };
 
 /*
@@ -92,27 +107,23 @@ async function terraMinted() {
     let balances = {} as Balances;
     const res = await retry(
       async (_bail: any) =>
-        await axios.get(
-          "https://api.extraterrestrial.money/v1/api/supply?denom=uusd"
-        )
+        await axios.get("https://terra-classic-fcd.publicnode.com/v1/totalsupply/uusd")
     );
-    const totalSupply = res.data.uusd[0].total;
-    sumSingleBalance(balances, "peggedUSD", totalSupply / 10 ** 6);
+    const totalSupply = res.data / 10**6;
+    sumSingleBalance(balances, "peggedUSD", totalSupply, "issued", false);
     return balances;
   };
 }
 
 const adapter: PeggedIssuanceAdapter = {
   terra: {
-    minted: async () => {
-      return { peggedUSD: 11278778389 };
-    }, // terraMinted() is currently broken
+    minted: terraMinted(),
     unreleased: async () => ({}),
   },
   ethereum: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    terra: multiFunctionBalance(
+    terra: sumMultipleBalanceFunctions(
       [
         bridgedSupply(
           "ethereum",
@@ -131,7 +142,7 @@ const adapter: PeggedIssuanceAdapter = {
   bsc: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    terra: multiFunctionBalance(
+    terra: sumMultipleBalanceFunctions(
       [
         bridgedSupply("bsc", 6, chainContracts.bsc.bridgedFromTerra6Decimals),
         bridgedSupply("bsc", 18, chainContracts.bsc.bridgedFromTerra18Decimals),
@@ -151,7 +162,7 @@ const adapter: PeggedIssuanceAdapter = {
   polygon: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    terra: multiFunctionBalance(
+    terra: sumMultipleBalanceFunctions(
       [
         bridgedSupply(
           "polygon",
@@ -187,13 +198,11 @@ const adapter: PeggedIssuanceAdapter = {
     unreleased: async () => ({}),
     terra: bridgedSupply("avax", 6, chainContracts.avax.bridgedFromTerra),
   },
-  /* broken at the moment, add back in later
   osmosis: {
     minted: async () => ({}),
     unreleased: async () => ({}),
-    terra: osmosisSupply(UST),
+    terra: osmosisSupply("ustc", "Axelar", "Terra"),
   },
-  */
   moonbeam: {
     minted: async () => ({}),
     unreleased: async () => ({}),
@@ -217,6 +226,34 @@ const adapter: PeggedIssuanceAdapter = {
     minted: async () => ({}),
     unreleased: async () => ({}),
     terra: bridgedSupply("fuse", 18, chainContracts.fuse.bridgedFromTerra),
+  },
+  arbitrum: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    terra: bridgedSupply(
+      "arbitrum",
+      6,
+      chainContracts.arbitrum.bridgedFromTerra
+    ),
+  },
+  optimism: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    terra: bridgedSupply(
+      "optimism",
+      6,
+      chainContracts.optimism.bridgedFromTerra
+    ),
+  },
+  metis: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    terra: bridgedSupply("metis", 6, chainContracts.metis.bridgedFromTerra),
+  },
+  dfk: {
+    minted: async () => ({}),
+    unreleased: async () => ({}),
+    terra: bridgedSupply("dfk", 6, chainContracts.dfk.bridgedFromTerra),
   },
 };
 
