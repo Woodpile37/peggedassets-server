@@ -49,7 +49,7 @@
     "typescript": "^4.2.3"
   },
   "dependencies": {
-    "@acala-network/api": "^3.0.2",
+    "@acala-network/api": "^4.1.5",
     "@connext/nxtp-contracts": "0.0.94",
     "@connext/nxtp-utils": "0.0.94",
     "@defillama/adapters": "file:./DefiLlama-Adapters",
