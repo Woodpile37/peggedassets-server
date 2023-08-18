@@ -38,7 +38,7 @@
     "nodemon": "^2.0.17",
 	"limiter": "2.1.0",
     "prettier": "^2.2.1",
-    "serverless": "^3.0.0",
+    "serverless": "^3.28.1",
     "serverless-esbuild": "^1.26.1",
     "serverless-offline": "^10.2.1",
     "serverless-prune-plugin": "^1.4.4",
